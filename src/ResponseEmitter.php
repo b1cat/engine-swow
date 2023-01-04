@@ -11,35 +11,36 @@ declare(strict_types=1);
  */
 namespace Hyperf\Engine;
 
+use Exception;
+use Hyperf\Contract\StdoutLoggerInterface;
 use Hyperf\HttpServer\ResponseEmitter as Emitter;
 use Psr\Http\Message\ResponseInterface;
 use Swow\Psr7\Message\ResponsePlusInterface;
+use Swow\Psr7\Psr7;
 use Swow\Psr7\Server\ServerConnection;
 
 class ResponseEmitter extends Emitter
 {
+    public function __construct(protected ?StdoutLoggerInterface $logger)
+    {
+    }
+
     /**
      * @param ResponseInterface|ResponsePlusInterface $response
      * @param ServerConnection $connection
      */
     public function emit(ResponseInterface $response, mixed $connection, bool $withContent = true): void
     {
-        $headers = $response->getHeaders();
-        $body = (string) $response->getBody();
-        if ($connection->shouldKeepAlive() !== null) {
-            $headers['Connection'] = $connection->shouldKeepAlive() ? 'Keep-Alive' : 'Closed';
-        }
-        if (! $response->hasHeader('Content-Length')) {
-            $headers['Content-Length'] = strlen($body);
-        }
+        try {
+            if ($connection->getProtocolType() === ServerConnection::PROTOCOL_TYPE_WEBSOCKET) {
+                return;
+            }
 
-        if ($response instanceof ResponsePlusInterface) {
-            $response->setHeaders($headers);
-        } else {
-            $response = $response->withAddedHeader('Connection', $headers['Connection'])
-                ->withAddedHeader('Content-Length', $headers['Content-Length']);
-        }
+            Psr7::setHeaders($response, $response->getStandardHeaders());
 
-        $connection->sendHttpResponse($response);
+            $connection->sendHttpResponse($response);
+        } catch (Exception $exception) {
+            $this->logger?->critical((string) $exception);
+        }
     }
 }
